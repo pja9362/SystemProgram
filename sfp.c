@@ -1,403 +1,395 @@
 #include "sfp.h"
 #include <stdlib.h>
+//#include <float.h>
 
-// 1~4 대충 바꾸긴 함, 변수명 바꾸기, special case 처리하기!
+// convert int to sfp
 sfp int2sfp(int input){
-	int bits[16];
-    int indB = 0;
+	int bitArr[16]; // array to store 16-bit
+    int bIdx = 0; // index of bitArr
 
-    if(input>=0)
-        bits[indB] = 0;
+    int MArr[17]; // array to store 'M' value 
+    int mIdx = 0; // index of MArr
+
+    // sign bit => positive: 0, negative 1
+    if(input>=0){
+        if(input==0)
+            return +0.0;
+        bitArr[bIdx] = 0;
+    }
     else {
-        bits[indB] = 1;
-        input = -input;
+        bitArr[bIdx] = 1;
+        input = -input; // negative -> positve
     }
-    indB++;
+    bIdx++;
 
-    int M[17]; // 16이면 안되낭? 굳이?
-    int indM = 0;
-
-    // 완전 동일
-    while(input>0 && indM<17)
+    // decimal to binary
+    while(input>0 && mIdx<17)
     {
-        M[indM++] = input%2;
+        MArr[mIdx++] = input%2;
         input /= 2;
-        // indM++;
     }
-    indM--; // 마지막 증가와, 리딩자리 정수 자리 1 빼주기
+    mIdx--; 
 
     int exp;
-    exp = indM + 15; // ㅇㅈ E = exp - 15, E = 계산한 m의 index 자리수와 같음
+    exp = mIdx + 15; // E = exp - 15, E == index of M
 
-    //요기 내가 수정함 !! 함 바꿔봄 비트말고!! 안되네 왲;? 된당 ㅜㅜ
+    // exp <- decimal to binary
     for (int i=5; i>0; i--) {
         if(exp !=0) {
-            bits[i] = exp%2;
+            bitArr[i] = exp%2;
             exp /= 2;
         }
         else {
-            bits[i] = 0;
+            bitArr[i] = 0;
         }
-        indB++; // 한자리 채운거니까
+        bIdx++; // increase a bit index after assign the value
     }
 
-    //
     if(exp!=31) {
-        indM--; // 마지막 자리 leading 1 이니까 제외
-        // 2진수 변환 하여 배열에 담아둔 값 거꾸로 입력
-        while(indM>=0 && indB<16) 
-            bits[indB++] = M[indM--];
+        mIdx--; 
+        // input fractional value using bitArr and MArr
+        while(mIdx>=0 && bIdx<16) 
+            bitArr[bIdx++] = MArr[mIdx--];
 
-        for(;indB<16;indB++)
-            bits[indB] = 0;
+        // assign 0 to empty space
+        for(;bIdx<16;bIdx++)
+            bitArr[bIdx] = 0;
     }
-    // 최대, EXP 다 1, frac 다 0 <- QQ 0이라고 장담할 수 있나 어차피 INF 아님?
+    // Special case: exp =111...1
     else {
-        for(; indB<16; indB++)
-        {
-            bits[indB]=0;
-        }
+        for(; bIdx<16; bIdx++)
+            bitArr[bIdx]=0;
     }
     
     sfp result = 0; 
-    for(int i=0;i<16;i++) {
-        result += bits[i] << (15-i);
-    } // 숫자화 이과정 이해가 잘 안되긴 함 똑같이 가져가기
+    for(int i=0;i<16;i++) 
+        result += bitArr[i] << (15-i);
+    // convert array type to sfp type using shift(<<)
 
     return result;
 }
+// sfp => unsigned short : 0~65535
 
 int sfp2int(sfp input){
-    int bits[16]; // 16자리 배열
+    int bitArr[16]; // array to store 16-bit
 
+    // sfp to binary
     for(int i=15; i>=0; i--) {
         if(input!=0) {
-            bits[i] = input%2;
+            bitArr[i] = input%2;
             input /= 2;
         }
+        // store 0 in remaining space
         else {
-            bits[i] = 0;
+            bitArr[i] = 0;
         }
     }
     
-    int exp=0; // 인덱스별로 가중치를 부여하여 exp 연산하기 (2)w - idx 관계가 5차이
-    int W_value = 0; // 가중치 부여한 각 자리 값
+    int exp=0;
+    int W_value = 0; // to store value calculated by considering weights for each Index 
     
-    for(int expi=1; expi<6; expi++) {
-        W_value = bits[expi] << (5-expi);
+    for(int expIdx=1; expIdx<6; expIdx++) {
+        W_value = bitArr[expIdx] << (5-expIdx);
         exp += W_value;
     }
-    // 다 1, 뒤에 다 0 사실 뒤 값은 상관 없는듯. 암튼 31 이 파트는 특이 케이스! 조건에 따라 따로 처리
+    // Special cases: exp =111...1
     if(exp == 31)
     {
-        for(int fraci=6; fraci<16; fraci++)
-        {
-            if(bits[fraci]) return -214783648; //NaN 값 임의 -> TMin
-        }
-        if(!bits[0]) return 2147483647; // + 무한대, TMax : 2^(w-1)-1
-        else return -2147483647; // -무한대 , TMin : -2^(w-1)
-    }
-    
-    // 값비교 함수 가서 확인해보깅
-    // if(exp == 31)
-    // {
-    //     for(int fraci=6; fraci<16; fraci++)
-    //     {
-    //         if(bits[fraci]) return -32768; //NaN 값 임의 -> TMin
-    //     }
-    //     if(!bits[0]) return 32767; // + 무한대, TMax : 2^(w-1)-1 w가 비트 수라면 32767
-    //     else return -32768; // -무한대 , TMin : -2^(w-1) -32768
-    // }
+        if(bitArr[0]) return -2147483648; // -inf
+        else return 2147483647; // +inf
 
-    int E =exp-15;
+        for(int fracIdx=6; fracIdx<16; fracIdx++)
+        {
+            if(bitArr[fracIdx]) return -2147483648; //NaN 
+        }
+    }
+
+    // E = exp - bias, bias = 15
+    int E = exp-15;
     if(E<0) return 0;
 
-    // int v=0;
-    // v+= 1<< E; // v = (-1)^s * M * 2^E --> 2의 e제곱 형태로 바꿔주기
-    // int c = E-1; // E는 (M - 1) 정수자리 한 자리 제외.
-    // for(int fraci = 6; fraci<6+E && fraci <16; fraci++) {
-    //     v += bits[fraci] << c;
-    //     c--;
-    // } // 더 고민해보기
-
-    // 바꾸긴 했음
-    int v = 0;
+    // V = (-1)^(s) * M * 2^(E)
+    int V = 0; 
     int temp = E-1;
-    int W= 1<<E;
-    for(int fraci = 6; fraci < 16 && fraci < 6+E; fraci++) {
-        W += bits[fraci] << temp;
+    int W = 1<<E; // weights for each Index
+    for(int fracIdx = 6; fracIdx < 16 && fracIdx < 6+E; fracIdx++) {
+        W += bitArr[fracIdx] << temp;
         temp--;
     }
-    v = W << E >> E;
+    V = W << E >> E;
 
-    if(bits[0]) v=-v; //부호체크
+    if(bitArr[0]) V=-V; // sign bit '1' means negative
 
-    return v;
+    return V;
 }
 
+
+// convert float to sfp
 sfp float2sfp(float input){
-    int bits[16];
-    int indB = 0;
+    int bitArr[16]; // array to store 16-bit
+    int bIdx = 0; // index of bitArr
 
-    // sign bit 설정
-    if(input>=0)
-        bits[indB] = 0;
+    // sign bit => positive: 0, negative 1
+    if(input>=0) {
+        if(input==0)
+            return +0.0;
+        bitArr[bIdx] = 0;
+    }
     else {
-        bits[indB] = 1;
-        input = -input;
+        bitArr[bIdx] = 1;
+        input = -input; // negative to positive
     }
-    indB++;
+    bIdx++;
 
-    int ipart = (int) input; // 정수부분
-    float fpart = input - ipart; // 소수부분
+    int iNum = (int) input; // int part
+    float fNum = input - iNum; // float(fractional) part
 
-    int integer[17]; // 정수 -> 이진수화
-    int indI = 0;
+    // to store values about 'int' part and index of iArr
+    int iArr[17]; int iIdx = 0;
 
-    // 정수부분 배열에 담기 -- 앞에 정수변환과 동일
-    while(ipart>0 && indI<17) {
-        integer[indI++] = ipart%2;
-        ipart/=2;// ipart 0 이면 다 0 으로 넣기
+    // decimal to binary
+    while(iNum>0 && iIdx<17) {
+        iArr[iIdx++] = iNum%2;
+        iNum/=2;
     }
-    indI--;
+    iIdx--;
 
-    // 소수부분 배열에 담기 -- 
-    int fractional[15]; // 소수부분 -> 이진수화
-    int indF = 0; // 배열 인덱스
-    int posF = 999; // 1 찾기 LeadNum
+    // to store values about 'float' part and index of fArr
+    int fArr[15];  int fIdx = 0; 
 
-    // 소수부분 존재
-    while(fpart && indF<15) {
-        fpart*=2;
-        fractional[indF++] = (int) fpart;
-        fpart -= (int) fpart;
+    int pos = 999; 
 
-        if(indI<0) {
+    while(fNum && fIdx<15) {
+        fNum*=2;
+        fArr[fIdx++] = (int) fNum;
+        fNum -= (int) fNum;
+
+        if(iIdx<0) {
             for(int i=0; i<15; i++) {
-                if(fractional[i]) {
-                    posF = i;
+                if(fArr[i]) {
+                    pos = i;
                     break;
                 }
             }
         }
     }
+    // E = exp-15
+    int exp; int E;
 
-    int exp;
-    int E;
-
-    // 정수부분이 존재하는 경우
-    if(indI>=0) {
-        E = indI;
+    // there is an integer part
+    if(iIdx>=0) {
+        E = iIdx;
         exp = E+15;
     } 
-    // 정수 존재 X
+    // no integer part
     else {
-        if(posF!=999) {
-            E = -(posF+1);
+        if(pos!=999) {
+            E = -(pos+1);
             exp= E + 15;
-        } //소수부분에 1이 존재하는 경우
+        } 
         else 
-            exp=0; // 0인 경우
+            exp=0; 
     }
     
-    // 내가 수정함 int2Sfp 때랑 같은 맥락~ 거꾸로 담기!
+    // decimal to binary
     for (int i=5; i>0; i--) {
         if(exp !=0) {
-            bits[i] = exp%2;
+            bitArr[i] = exp%2;
             exp /= 2;
         }
         else {
-            bits[i] = 0;
+            bitArr[i] = 0;
         }
-        indB++; // 한자리 채운거니까
+        bIdx++;  
     }
 
-    // 예외 케이스 --> 조건에 맞추기
+    // Special cases: exp = 111..1
     if(exp == 31)
     {
-        for(;indB<16;indB++)
+        for(;bIdx<16;bIdx++)
         {
-            bits[indB] = 0;
+            bitArr[bIdx] = 0;
         }
     }
-
     else {
-        indI--; // M 앞에 리딩1 빼고
-        while (indI>=0 && indB<16)
-            bits[indB++] = integer[indI--];
+        iIdx--; 
+        while (iIdx>=0 && bIdx<16)
+            bitArr[bIdx++] = iArr[iIdx--]; // put integer part
 
-        int fraci = 0; // 차례로 담겨있음 순서대로 담기
+        int fracIdx = 0; 
 
-        if(posF!=999) 
-            fraci = posF+1; // 소수부만 있는 경우, posF가 M의 리딩 1 이 되니까 그 다음부터!
+        if(pos!=999) 
+            fracIdx = pos+1; // (becuse normalized case, implied leading 1)
         
-        for(;fraci<indF && indB<16; fraci++)
-            bits[indB++] = fractional[fraci];
+        for(;fracIdx<fIdx && bIdx<16; fracIdx++)
+            bitArr[bIdx++] = fArr[fracIdx]; // put fractional(float) part
         
-        for (;indB<16;indB++)
-            bits[indB] = 0;
+        for (;bIdx<16;bIdx++) // put 0 to empty index
+            bitArr[bIdx] = 0;
     }
 
     sfp result = 0;
     for(int i=0; i<16; i++)
-        result += bits[i] << (15-i);
-    // 그냥 갖고 가기
-
+        result += bitArr[i] << (15-i);
+    // convert array type to sfp type using shift(<<)
     return result;
 }
 
 
 float sfp2float(sfp input){
     
-    int bits[16];
-    // 내가 수정 위에 함수들과 같은 맥락
+    int bitArr[16]; // array to store 16-bit
+
+    // decimal to binary
     for(int i=15; i>=0; i--) {
         if(input!=0) {
-            bits[i] = input%2;
+            bitArr[i] = input%2;
             input /= 2;
         }
         else 
-            bits[i] = 0;
+            bitArr[i] = 0;
     }
 
-    int exp=0; // 가중치 부여하며 exp 연산하기
-    int W_value = 0; // 가중치 부여한 각 자리 값
+    int exp=0; 
+    int W_value = 0; // to store value calculated by considering weights for each Index 
 
-    for(int expi=1; expi<6; expi++) {
-        W_value = bits[expi] << (5-expi);
+    for(int expIdx=1; expIdx<6; expIdx++) {
+        W_value = bitArr[expIdx] << (5-expIdx);
         exp += W_value;
     }
 
-    int E = exp - 15; // 공식 적용하여 E 구하기
+    // E = exp - bias, V = (-1)^(s) * M * 2^(E)
+    int E = exp - 15; 
+    float V = 0; 
+    
+    int fracIdx = 6;
+    int W=6;
 
-    float v = 0; // float v = 0f;
-    int c,fraci = 6;
-    if(exp==0) // when exp ==0, denormarlized 특별 케이스 따로 처리
-        c=-E;
-    else if(E<0) // 소수부분만 있는 경우
+    if(exp==0) // when exp ==0, denormarlized
+        W = -E;
+    else if(E<0) // No Integer part
     {
-        c=-E;
-        // v+= (float) 1 / (float) (1 <<c); // 2^E 부분 처리
-         v+= 1 / (float) (1 <<c);
+        W=-E;
+         V += 1 / (float) (1 << W);
     }
-    else{ // 정수부분 존재
-        // 정수부분 처리
-        c = E-1;
-        v+= 1<< E;
-        for(;fraci<6+E && fraci<16; fraci++) {
-            v += bits[fraci] <<c ;
-            c--;
+    else{ // Exists Integer part
+        // calculate int part
+        W = E-1;
+        V += 1<< E;
+        for(;fracIdx<6+E && fracIdx<16; fracIdx++) {
+            V += bitArr[fracIdx] << W ;
+            W--;
         }
-        c++; // c 0으로 만들기
+        W++; 
     }
-    c++; // c 1로 만들기 , 소수부분 처리하려고
-    for(;fraci<16;fraci++) {
-        if(bits[fraci]) v+= 1 / (float) (bits[fraci]<<c);
-        c++;
+    W++;
+
+    // calculate frac part
+    for(;fracIdx<16;fracIdx++) {
+        if(bitArr[fracIdx]) 
+            V += 1 / (float) (bitArr[fracIdx] << W);
+        W++;
     }
 
-    if(bits[0]) v = -v;
+    if(bitArr[0]) V = -V; // sign bit '1' means negative
 
-    return v;
+    return V;
 }
 
 sfp sfp_add(sfp a, sfp b){
+    // find s, exp, frac of a,b using Shift(<<,>>)
 
-    // 15칸 이동시키면 부호비트만 남게됨
+    // find sign bit , size: first 1 bit
     unsigned short signA, signB;
     signA = a >> 15; 
     signB = b >> 15;
-
-    unsigned short expA, expB, mntA, mntB;
-    expA = a << 1; expA = expA >> 11; // 5개만 남기기
+    // find exp , size: 5 bit
+    unsigned short expA, expB;
+    expA = a << 1; expA = expA >> 11;
     expB = b << 1; expB = expB >> 11;
+    // find frac , size: 10 bit
+    unsigned short fracA, fracB;
+    fracA = a << 6; fracA = fracA >> 6;   
+    fracB = b << 6; fracB = fracB >> 6;
 
-    mntA = a << 6; mntA = mntA >> 6;    //m만 남기기
-    mntB = b << 6; mntB = mntB >> 6;
+    sfp result = 0; // to store the result after addition
+    unsigned short signR, expR, fracR;
 
-    sfp result = 0;
-    unsigned short sR, expR, mntR;
+    short Shift; // to store calculate bit-Shift
 
-    // 특별 케이스 나중에 확인
-    sfp NaN = 31<<10 + 1; // +가 우선함
-    // 둘다 스페셜 케이스
-    //a,b 둘다 inf
+    // Special cases
+    sfp NaN = (31<<10) + 1;
+    //31 --> 111..1
     if(expA==31 && expB==31) {
-        // 둘 중에 하나라도 frac에 1이 존재한다면
-        if(mntA || mntB) return NaN;
-        // 두 부호가 다르다면,
+        if(fracA || fracB) return NaN;
         else if(signA != signB) return NaN;
-        else return a; //b여도 상관 X
+        else return a; 
     }
     else if (expA==31 || expB==31) {
-        // a만 inf
         if (expA == 31) return a;
-        // b만 inf
         else return b;
     }
 
-    // M : leading 1이니까!
-    if(expA!=0) mntA += (1<<10);
-    if(expB!=0) mntB += (1<<10);
+    // In normalized case, M : implied leading 1
+    if(expA!=0) fracA += (1<<10);
+    if(expB!=0) fracB += (1<<10);
     
-    // 이동 칸
-    short shftP = expA + (~expB) + 1; // 빼깅 1의 보수 활용
-    // a가 더 클 때
-    if (shftP >=0 ) {
-        mntB = mntB >> shftP;
-        expR = expA; // a지수로
+    // use 'two's complement
+    Shift = expA + (~expB) + 1; 
+    // when (expA >= expB)
+    if (Shift >=0 ) {
+        fracB = fracB >> Shift;
+        expR = expA; 
     }
-    // b가 더 클 때
+    // when (expA < expB)
     else {
-        mntA = mntA >> (~shftP)+1; //개중요라인
-        expR = expB; // b지수로
+        fracA = fracA >> (~Shift) + 1; 
+        expR = expB; 
     }
 
+    // same sign; all negative or all positive
     if(signA == signB) {
-        sR = signA;
-        mntR = mntA + mntB;
+        signR = signA;
+        fracR = fracA + fracB;
     }
+    // different sign (+ or -)
     else {
-        // A가 더 클 때
-        if(mntA > mntB) {
-            sR = signA;
-            mntR = mntA + (~mntB) +1 ;
+        if(fracA > fracB) {
+            signR = signA;
+            fracR = fracA + (~fracB) +1 ;
         }
-        // B가 더 클 때
         else {
-            sR = signB;
-            mntR = mntB + (~mntA) + 1;
+            signR = signB;
+            fracR = fracB + (~fracA) + 1;
         }
     }
 
-    // 해당 자리 값이 같냐 뒤에서부터 12번째자리 mntR 1이냐
-    if(mntR & (1<<11)) {
-        expR += 1; // 올림수
-        // if((mntR&1) && ((mntR-1)%4)) mntR += 1; round-to-even ? 뭐라냐
-        mntR = mntR >> 1;
+    if(fracR & (1<<11)) {
+        expR += 1; //increase the exp
+        fracR = fracR >> 1;
     }
-    // 해당 자리 값이 같냐 뒤에서부터 11번째자리 mntR 1이냐
-    else if(!(mntR & (1<<10)))
+    else if(!(fracR & (1<<10)))
     {
-        int k = 999;
+        int key = 999;
         for(int i=1; i<=10; i++)
         {
-            if(mntR & 1<<(10-i)) {
-                k=i;
+            if(fracR & 1<<(10-i)) {
+                key=i;
                 break;
             }
         }
-        if(k!=999) {
-            expR -= k;
-            mntR = mntR << k;
+        if(key!=999) {
+            expR -= key;
+            fracR = fracR << key;
         } 
         else expR = 0;
     }
-    sR = sR << 15;
+    // put s exp,and frac together using shift operator
+    signR = signR << 15;
     expR = expR << 10;
-    mntR -= ( mntR&(1<<10) );
+    fracR -= ( fracR&(1<<10) );
 
-    result = sR + expR + mntR;
+    result = signR + expR + fracR;
 
     return result;
 }
@@ -494,44 +486,51 @@ sfp sfp_mul(sfp a, sfp b){
     result += mntR;
     return result;
 }
-
+// convert sfp to bit
 char* sfp2bits(sfp result){
-    char* bits = (char*)malloc(sizeof(char)*17);
-    int indB = 0;
+    char* bitArr = (char*)malloc(sizeof(char)*17);
 
-    int tmp;
-    for(int c=15;c>=0;c--) {
-        tmp = result >> c;
-        if(tmp &1) bits[indB] = '1';
-        else bits[indB] = '0';
-        indB++;
+    int temp; int bIdx = 0;
+
+    for(int W=15;W>=0;W--) {
+        temp = result >> W;
+        if(temp&1) {
+            bitArr[bIdx++] = '1';
+        } else {
+            bitArr[bIdx++] = '0';
+        }
     }
-    bits[indB] = '\0';
+    bitArr[bIdx] = '\0';
 
-    return bits;
+    return bitArr;
 }
 
 
 char* sfp_comp(sfp a, sfp b){
-   unsigned short signA, signB;
+    // find s, exp, frac of a,b using Shift(<<,>>)
+
+    // find sign bit , size: first 1 bit
+    unsigned short signA, signB;
     signA = a >> 15; 
-    
     signB = b >> 15;
-
-
-    unsigned short expA, expB, mntA, mntB;
-    expA = a << 1; expA = expA >> 11; // 5개만 남기기
+    // find exp , size: 5 bit
+    unsigned short expA, expB;
+    expA = a << 1; expA = expA >> 11;
     expB = b << 1; expB = expB >> 11;
+    // find frac , size: 10 bit
+    unsigned short fracA, fracB;
+    fracA = a << 6; fracA = fracA >> 6;   
+    fracB = b << 6; fracB = fracB >> 6;
 
-    mntA = a << 6; mntA = mntA >> 6;    //m만 남기기
-    mntB = b << 6; mntB = mntB >> 6;
-
-    if(signA==signB && expA==expB && mntA==mntB)
+    // when a,b has same value
+    if(signA==signB && expA==expB && fracA==fracB)
         return "=";
 
-    signB = (~signB); // b 부호 바꾸기
+    // change b's sign bit
+    // to use subtraction by applying the addition function's feature
+    signB = (~signB); 
 
-    unsigned short sR, expR, mntR;
+    unsigned short signR, expR, fracR;
 
     // 특별 케이스 나중에 확인
     // sfp NaN = 31<<10 + 1; // +가 우선함
@@ -539,7 +538,7 @@ char* sfp_comp(sfp a, sfp b){
     // //a,b 둘다 inf
     // if(expA==31 && expB==31) {
     //     // 둘 중에 하나라도 frac에 1이 존재한다면
-    //     if(mntA || mntB) return NaN;
+    //     if(fracA || fracB) return NaN;
     //     // 두 부호가 다르다면,
     //     else if(signA != signB) return NaN;
     //     else return a; //b여도 상관 X
@@ -551,66 +550,65 @@ char* sfp_comp(sfp a, sfp b){
     //     else return b;
     // }
 
-    // M : leading 1이니까!
-    if(expA!=0) mntA += (1<<10);
-    if(expB!=0) mntB += (1<<10);
+    // In normalized case, M : implied leading 1
+    if(expA!=0) fracA += (1<<10);
+    if(expB!=0) fracB += (1<<10);
     
-    // 이동 칸
-    short shftP = expA + (~expB) + 1; // 빼깅 1의 보수 활용
-    // a가 더 클 때
-    if (shftP >=0 ) {
-        mntB = mntB >> shftP;
-        expR = expA; // a지수로
+    // use 'two's complement
+    short Shift = expA + (~expB) + 1; 
+    // when (expA >= expB)
+    if (Shift >=0 ) {
+        fracB = fracB >> Shift;
+        expR = expA; 
     }
-    // b가 더 클 때
+    // when (expA < expB)
     else {
-        mntA = mntA >> (~shftP)+1; //개중요라인
-        expR = expB; // b지수로
+        fracA = fracA >> (~Shift) + 1; 
+        expR = expB; 
     }
 
+    // same sign; all negative or all positive
     if(signA == signB) {
-        sR = signA;
-        mntR = mntA + mntB;
+        signR = signA;
+        fracR = fracA + fracB;
     }
+    // different sign (+ or -)
     else {
-        // A가 더 클 때
-        if(mntA > mntB) {
-            sR = signA;
-            mntR = mntA + (~mntB) +1 ;
+        if(fracA > fracB) {
+            signR = signA;
+            fracR = fracA + (~fracB) +1 ;
         }
-        // B가 더 클 때
         else {
-            sR = signB;
-            mntR = mntB + (~mntA) + 1;
+            signR = signB;
+            fracR = fracB + (~fracA) + 1;
         }
     }
 
-    // 해당 자리 값이 같냐 뒤에서부터 12번째자리 mntR 1이냐
-    if(mntR & (1<<11)) {
-        expR += 1; // 올림수
-        // if((mntR&1) && ((mntR-1)%4)) mntR += 1; round-to-even ? 뭐라냐
-        mntR = mntR >> 1;
+    if(fracR & (1<<11)) {
+        expR += 1; //increase the exp
+        fracR = fracR >> 1;
     }
-    // 해당 자리 값이 같냐 뒤에서부터 11번째자리 mntR 1이냐
-    else if(!(mntR & (1<<10)))
+    else if(!(fracR & (1<<10)))
     {
-        int k = 999;
+        int key = 999;
         for(int i=1; i<=10; i++)
         {
-            if(mntR & 1<<(10-i)) {
-                k=i;
+            if(fracR & 1<<(10-i)) {
+                key=i;
                 break;
             }
         }
-        if(k!=999) {
-            expR -= k;
-            mntR = mntR << k;
+        if(key!=999) {
+            expR -= key;
+            fracR = fracR << key;
         } 
         else expR = 0;
     }
-    sR = sR << 15;
+    // through previous process, the final signR determines return value
+    // signR => '1' means a<b, '0' means a>b
+    signR = signR << 15;
 
-    if(sR==1) {
+    if(signR==1) {
         return "<";
     } 
     else 
